@@ -1,68 +1,62 @@
-"""
-Utility functions for Khmer OCR
-CTC decoding, text-to-ID conversion, and other helpers
-"""
-
 import torch
 
+class KhmerLabelConverter:
+    """
+    Manages the vocabulary for the OCR model.
+    Converts 'ក' -> 5 (Encoding) and 5 -> 'ក' (Decoding).
+    """
+    def __init__(self, chars):
+        # Sort characters to ensure deterministic ID assignment
+        self.chars = sorted(list(set(chars)))
+        
+        # 0 is reserved for the CTC 'blank' token
+        # So our characters start from index 1
+        self.char_to_id = {c: i + 1 for i, c in enumerate(self.chars)}
+        self.id_to_char = {i + 1: c for i, c in enumerate(self.chars)}
+        
+        # The blank token is always 0
+        self.blank_id = 0
+    
+    def encode(self, text):
+        """
+        Converts a text string into a list of IDs.
+        Example: "កខ" -> tensor([10, 11])
+        """
+        # Remove Zero Width Space (common in Khmer text but useless for OCR)
+        text = text.replace('\u200b', '') 
+        
+        encoded = []
+        for char in text:
+            if char in self.char_to_id:
+                encoded.append(self.char_to_id[char])
+            else:
+                # Optionally handle unknown characters here
+                # For now, we just skip them
+                continue
+        
+        return torch.tensor(encoded, dtype=torch.long)
 
-def text_to_ids(text, char_to_id):
-    """
-    Convert text to a sequence of character IDs
-    
-    Args:
-        text: Input text string
-        char_to_id: Dictionary mapping characters to IDs
-    
-    Returns:
-        List of character IDs
-    """
-    return [char_to_id.get(char, 0) for char in text]
+    def decode(self, current_ids):
+        """
+        Converts a list of IDs back to a string.
+        filters out the CTC blank token (0).
+        """
+        res = ""
+        for i in current_ids:
+            # Skip the blank token
+            if i == self.blank_id:
+                continue
+            
+            # Convert ID back to character
+            # We check if 'i' is a tensor or int to be safe
+            idx = i.item() if isinstance(i, torch.Tensor) else i
+            res += self.id_to_char.get(idx, "")
+            
+        return res
 
-
-def ids_to_text(ids, id_to_char):
-    """
-    Convert sequence of IDs back to text
-    
-    Args:
-        ids: List of character IDs
-        id_to_char: Dictionary mapping IDs to characters
-    
-    Returns:
-        Text string
-    """
-    return ''.join([id_to_char.get(id, '') for id in ids])
-
-
-def ctc_decode(predictions, blank_id=0):
-    """
-    Decode CTC predictions
-    
-    Args:
-        predictions: Model output predictions
-        blank_id: ID representing the blank label
-    
-    Returns:
-        Decoded sequence
-    """
-    # TODO: Implement CTC decoding logic
-    # Remove duplicate consecutive characters
-    # Remove blank labels
-    pass
-
-
-def create_char_mappings(texts):
-    """
-    Create character-to-ID and ID-to-character mappings
-    
-    Args:
-        texts: List of text samples
-    
-    Returns:
-        Tuple of (char_to_id, id_to_char) dictionaries
-    """
-    unique_chars = sorted(set(''.join(texts)))
-    char_to_id = {char: idx + 1 for idx, char in enumerate(unique_chars)}
-    char_to_id['<blank>'] = 0
-    id_to_char = {idx: char for char, idx in char_to_id.items()}
-    return char_to_id, id_to_char
+    def get_num_classes(self):
+        """
+        Returns total classes = (Number of unique chars) + 1 (Blank)
+        Used to define the final layer size of the model.
+        """
+        return len(self.chars) + 1
