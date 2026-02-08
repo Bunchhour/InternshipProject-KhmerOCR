@@ -24,7 +24,8 @@ def train():
 
     # 1. Setup Data
     # Load raw data to build vocab
-    raw_data = load_dataset("seanghay/khmer-hanuman-100k", split="train[:2000]") # Small subset for Sprint 2
+    # raw_data = load_dataset("seanghay/khmer-hanuman-100k", split="train[:2000]") # Small subset for Sprint 2
+    raw_data = load_dataset("seanghay/khmer-hanuman-100k") # Small subset for Sprint 2
     all_text = "".join([x['text'] for x in raw_data])
     vocab = sorted(list(set(all_text)))
     """ 

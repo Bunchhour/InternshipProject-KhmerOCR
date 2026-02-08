@@ -60,3 +60,41 @@ class KhmerLabelConverter:
         Used to define the final layer size of the model.
         """
         return len(self.chars) + 1
+    
+# ======= Code Testing ===================
+if __name__ == "__main__":
+    # Example Khmer characters (you can expand this)
+    khmer_chars = "កខគឃងចឆជញ"
+
+    # Initialize converter
+    converter = KhmerLabelConverter(khmer_chars)
+
+    # ---- BASIC INFO ----
+    print("Characters:", converter.chars)
+    print("Char → ID:", converter.char_to_id)
+    print("ID → Char:", converter.id_to_char)
+    print("Blank ID:", converter.blank_id)
+    print("Number of classes:", converter.get_num_classes())
+    print("-" * 40)
+
+    # ---- ENCODE TEST ----
+    text = "កខច"
+    encoded = converter.encode(text)
+
+    print("Original text:", text)
+    print("Encoded tensor:", encoded)
+    print("Encoded list:", encoded.tolist())
+    print("-" * 40)
+
+    # ---- DECODE TEST ----
+    decoded = converter.decode(encoded)
+
+    print("Decoded text:", decoded)
+    print("-" * 40)
+
+    # ---- CTC BLANK TEST ----
+    # Simulate model output with blanks (0)
+    ctc_output = torch.tensor([0, encoded[0], 0, encoded[1], encoded[2], 0])
+
+    print("CTC output (with blanks):", ctc_output.tolist())
+    print("Decoded (CTC cleaned):", converter.decode(ctc_output))
