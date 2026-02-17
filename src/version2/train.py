@@ -1,0 +1,109 @@
+import torch
+import torch.nn as nn
+import torch.optim as optim
+from torch.utils.data import DataLoader
+from tqdm import tqdm
+import os
+# Import your modules
+from dataset import KhmerOCRDataset
+from utils import KhmerLabelConverter
+from model import CRNN
+from datasets import load_dataset
+
+def train():
+    # --- CONFIG ---
+    BATCH_SIZE = 32
+    LEARNING_RATE = 0.001
+    EPOCHS = 10
+    DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+    print(f"🚀 Training on {DEVICE}...")
+
+    # 1. Setup Data
+    # Load raw data to build vocab
+    # raw_data = load_dataset("seanghay/khmer-hanuman-100k", split="train[:2000]") # Small subset for Sprint 2
+    raw_data = load_dataset("seanghay/khmer-hanuman-100k", split="train") # Specify split
+    
+    all_text = "".join([x['text'] for x in raw_data])
+    vocab = sorted(list(set(all_text)))
+    
+    converter = KhmerLabelConverter(vocab)
+    train_dataset = KhmerOCRDataset(split="train", converter=converter)
+    
+    # Collate function handles variable width images
+    def collate_fn(batch):
+        images = [item['image'] for item in batch]
+        labels = [item['label'] for item in batch]
+        original_texts = [item['original_text'] for item in batch]
+        label_lengths = torch.tensor([len(l) for l in labels], dtype=torch.long)
+        
+        # Pad images to the widest in the batch
+        max_w = max([img.shape[2] for img in images])
+        padded_imgs = torch.zeros(len(images), 1, 32, max_w)
+        for i, img in enumerate(images):
+            w = img.shape[2]
+            padded_imgs[i, :, :, :w] = img
+            
+        # Flatten labels for CTC
+        labels_concat = torch.cat(labels)
+        
+        return padded_imgs, labels_concat, label_lengths, original_texts
+    # updated train loader
+    train_loader = DataLoader(train_dataset, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_fn)
+
+    # 2. Setup Model
+    model = CRNN(num_classes=converter.get_num_classes(), hidden_size=256).to(DEVICE)
+    optimizer = optim.Adam(model.parameters(), lr=LEARNING_RATE)
+    criterion = nn.CTCLoss(blank=0, zero_infinity=True)
+
+    # 3. Training Loop
+    for epoch in range(EPOCHS):
+        model.train()
+        total_loss = 0
+        pbar = tqdm(train_loader, desc=f"Epoch {epoch+1}/{EPOCHS}")
+        
+        for images, targets, target_lengths, original_texts in pbar:
+            images = images.to(DEVICE)
+            targets = targets.to(DEVICE)
+            
+            # Forward Pass
+            # preds shape: (Time, Batch, NumClasses)
+            preds = model(images)
+            
+            # Calculate Input Lengths (Time steps)
+            # CNN reduces width by 8x (2*2*2). So Time = Width // 8
+            input_lengths = torch.full(size=(images.size(0),), fill_value=preds.size(0), dtype=torch.long).to(DEVICE)
+            
+            # Calculate Loss
+            loss = criterion(preds, targets, input_lengths, target_lengths)
+            
+            # Backward
+            optimizer.zero_grad()
+            loss.backward()
+            optimizer.step()
+            
+            total_loss += loss.item()
+            pbar.set_postfix({'loss': loss.item()})
+        
+        # --- QUICK TEST (Reality Check) ---
+        # Decode one prediction to see if it's learning
+        with torch.no_grad():
+            # Greedy Decode: Take max probability at each step
+            _, max_index = torch.max(preds, dim=2) # (Time, Batch)
+            pred_indices = max_index[:, 0].cpu().numpy().tolist() # Take first item in batch
+            decoded_text = converter.decode(pred_indices)
+            
+            print(f"\n--- Reality Check (Epoch {epoch+1}) ---")
+            print(f"Target: {original_texts[0]}")
+            print(f"Pred:   {decoded_text}")
+            print(f"--------------------------------------\n")
+            
+    # Save Model
+    checkpoint_dir = os.path.join(os.path.dirname(__file__), "checkpoints")
+    os.makedirs(checkpoint_dir, exist_ok=True)
+    model_path = os.path.join(checkpoint_dir, "sprint2_model.pth")
+    torch.save(model.state_dict(), model_path)
+    print(f"✅ Model Saved to: {model_path}")
+
+if __name__ == "__main__":
+    train()
